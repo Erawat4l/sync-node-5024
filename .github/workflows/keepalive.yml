@@ -1,0 +1,11 @@
+name: Render 24-7 KeepAlive
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Health Endpoint
+        run: curl -fsSL https://sync-node-5024.onrender.com/health
